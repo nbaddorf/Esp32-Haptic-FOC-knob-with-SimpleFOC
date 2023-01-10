@@ -84,6 +84,9 @@ float pos_min_rotation = 0;
 float offsetRad = 0;
 int current_detent_pos = 0;
 bool motor_has_loaded = false;
+bool motor_calibration_error = false;
+int button_pin = 5;
+bool old_button_state = false;
 
 float attract_angle = 0.0f;
 float old_attract_angle = 0.0f;
@@ -109,6 +112,8 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap)
 }
 
 void setup() {
+
+  
 
   knobPositionQueue = xQueueCreate(1, // Queue length
                               sizeof(struct knobState));
@@ -298,11 +303,7 @@ void motorTaskCode(void *pvParameters) {
     vTaskDelay(1);
   }
 
-  
-
-
-
-
+  pinMode(button_pin, INPUT_PULLUP);
   // initialize encoder sensor hardware
   encoder.init();
 
@@ -337,15 +338,16 @@ void motorTaskCode(void *pvParameters) {
   // initialize motor
   motor.init();
   // align sensor and start FOC
-  motor.initFOC();
-
+  motor_calibration_error = !motor.initFOC();
+ // Serial.println;
   Serial.println("Motor ready.");
   //Serial.println(pos_max_rotation);
   //Serial.println(detent);
   //float number_of_detent = pos_max_rotation / detent;
   //Serial.println(number_of_detent);
 
-  calibrate_detent(detent_set, 0, 12);
+  calibrate_detent(detent_set, 0, 3);
+  old_button_state = digitalRead(button_pin);;
   vTaskDelay(1000);
   //motor.loopFOC();
   //vTaskDelay(1000);
@@ -358,41 +360,22 @@ void motorTaskCode(void *pvParameters) {
     //Serial.println(shaftAngle);
 
     //setDetent(0.7, 15);
-    //motor.move(motor.PID_velocity(attract_angle - shaftAngle));
-    //float input = start_pos_rot - (start_rot - shaftAngle);
-   
-   //Serial.println(input);
-    
-    //pos_rot = constrain(input, 0, pos_max_rotation);
-    //Serial.println(pos_rot >= (detent / 2.00) && pos_rot <= (pos_max_rotation - (detent / 2.00)));
-    /*
-    float pid_input = input - pos_rot;
-    if (abs(pid_input) <= 0.05) {
-      pid_input = 0;
-    }
-*/
+
     //float deg_rot = pos_rot * (180.00 / PI);
     //float deg_max_rot = pos_max_rotation * (180.00 / PI);
-    //Serial.println(deg_max_rot);
-    
-    //Serial.println(number_of_detent);
-    //float test = detent * (180.00/PI);
-    
-    //Serial.println(pos_rot);
-    //vTaskDelay(500);
+    bool buttonState = digitalRead(button_pin);
+    //Serial.println(buttonState);
+    if (buttonState != old_button_state && !buttonState) {
+      Serial.println("button pressed");
+    }
+  
+   //rubber_temp_value = runDetentWithEndstops(0.9, detent_set, rubber_temp_value);
+    rubber_temp_value = runDetent(0.9, detent_set)%int(pos_max_rotation); 
+    rubber_temp_value = rubber_temp_value < 0? pos_max_rotation + rubber_temp_value : rubber_temp_value;
+   
+    old_button_state = buttonState;
 
-    //if (pid_input == 0) {      
-      //int num_current_detent = input < 0.00? (input - 1/ pos_max_rotation) * number_of_detent : (input/ pos_max_rotation) * number_of_detent ;
-    
-      //Serial.println(current_detent_pos);
-      //if (
-      //if (pos_rot >= (detent / 2.00) + 0.001 && pos_rot <= (pos_max_rotation - ((detent / 2.00) + 0.001))) {
-        //Serial.println("working");
-      
-       rubber_temp_value = runDetentWithEndstops(0.9, detent_set, rubber_temp_value);
-         //rubber_temp_value = runDetent(0.9, detent_set)%int(pos_max_rotation); 
-         rubber_temp_value = rubber_temp_value < 0? pos_max_rotation + rubber_temp_value : rubber_temp_value;
-        //motor.move(motor.PID_velocity(attract_angle - shaftAngle));
+      //motor.move(motor.PID_velocity(attract_angle - shaftAngle));
       //} else {
       //motor.move(0);
        // motor.move
