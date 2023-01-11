@@ -37,6 +37,8 @@ uint16_t  bg_color = 0;
 struct knobState {
   float rot;
   int num_of_detent;
+  bool in_menu;
+  int current_menu;
   //float detent_rad_width;
   //float max_rot;
   //float start_num;
@@ -85,8 +87,11 @@ float offsetRad = 0;
 int current_detent_pos = 0;
 bool motor_has_loaded = false;
 bool motor_calibration_error = false;
+bool endstop_calibrated = false;
 int button_pin = 5;
 bool old_button_state = false;
+int endstop_max_value = 0;
+int endstop_min_value = 0;
 
 float attract_angle = 0.0f;
 float old_attract_angle = 0.0f;
@@ -280,6 +285,29 @@ int runDetentWithEndstops(double detent_strength, double position_width_rad, dou
   
 }
 
+int runEndstops() {
+  float shaftAngle = motor.shaft_angle;
+  if (endstop_calibrated) {
+    endstop_calibrated = false;
+    start_rot = shaftAngle;
+    start_pos_rot = pos_rot;
+  } else {
+    float input = start_pos_rot - (start_rot - shaftAngle);
+    pos_rot = constrain(input, pos_min_rotation, pos_max_rotation);
+    Serial.println(start_rot);
+    float pid_input = input - pos_rot;
+    if (abs(pid_input) <= 0.05) {
+      pid_input = 0;
+    }
+    if (pid_input != 0) {
+      motor.move(P_rubber(pid_input) * -1);
+    } else {
+      motor.move(0);
+    }
+    return constrain(map(pos_rot * 100,pos_min_rotation * 100, pos_max_rotation * 100, endstop_min_value * 100, (endstop_max_value) * 100) / 100.00, endstop_min_value, endstop_max_value - 1);
+  }
+}
+
 void calibrate_detent(double detent_width_rad, double min_rotation, double max_detent_rotation) {
   attractor_distance = detent_width_rad;
   pos_min_rotation = min_rotation;
@@ -293,6 +321,16 @@ void calibrate_detent(double detent_width_rad, double min_rotation, double max_d
    //pos_max_rotation = (detent_width_rad * max_detent_rotation) * (_PI/180.00)); //3.14
   //Serial.println(offsetRad);
 }
+
+
+void calibrate_endstops(double min_rotation, double max_rotation, double min_value, double max_value) {
+  endstop_calibrated = true;
+  pos_min_rotation = min_rotation;
+  pos_max_rotation = max_rotation;
+  endstop_max_value = max_value;
+  endstop_min_value = min_value;
+}
+
 
 void motorTaskCode(void *pvParameters) {
   (void) pvParameters;
@@ -346,9 +384,27 @@ void motorTaskCode(void *pvParameters) {
   //float number_of_detent = pos_max_rotation / detent;
   //Serial.println(number_of_detent);
 
-  calibrate_detent(detent_set, 0, 3);
+  float detent_setting = 30.00 * (_PI/180.00);
+  float detent_strength = 0.9;
+  int current_min_rot = 0;
+  int current_max_rot = 3;
+
+  //0 == run knob
+  //1 == enable detent
+  //2 == enable rubberband
+  //3 == set detent width
+  //4 == set detent strength
+  //5 == set max detent rot
+  
+ 
+  int current_menu = 0;
+  bool in_menu = false;
+
+  //calibrate_detent(detent_set, 0, 3);
+  calibrate_endstops(0,PI, 0, 5);
   old_button_state = digitalRead(button_pin);;
   vTaskDelay(1000);
+
   //motor.loopFOC();
   //vTaskDelay(1000);
   
@@ -365,14 +421,41 @@ void motorTaskCode(void *pvParameters) {
     //float deg_max_rot = pos_max_rotation * (180.00 / PI);
     bool buttonState = digitalRead(button_pin);
     //Serial.println(buttonState);
-    if (buttonState != old_button_state && !buttonState) {
-      Serial.println("button pressed");
+    if (buttonState != old_button_state) {
+      hapticButton(!buttonState);
+      if (!buttonState) {
+        Serial.println("button pressed");
+        current_menu = current_menu >= 3? 0 : current_menu += 1;
+        in_menu = !in_menu;
+
+        if (current_menu == 0) {
+          
+        } else if (current_menu == 1) {
+          calibrate_detent(detent_set, 0, 20);
+        } else if (current_menu == 2) {
+          calibrate_detent(detent_set, 0, 3);
+        } else if (current_menu == 3) {
+          calibrate_endstops(0,PI, 0, 5);
+        }
+        Serial.println(current_menu);
+      }
+    }
+   
+
+    if (current_menu == 0) {
+      motor.move(0);
+    } else if (current_menu == 1) {
+      rubber_temp_value = runDetent(0.9, 7 * (PI/180)); 
+    } else if (current_menu == 2) {
+      rubber_temp_value = runDetentWithEndstops(0.9, detent_set, rubber_temp_value);
+    } else if (current_menu == 3) {
+      rubber_temp_value = runEndstops();
     }
   
    //rubber_temp_value = runDetentWithEndstops(0.9, detent_set, rubber_temp_value);
-    rubber_temp_value = runDetent(0.9, detent_set)%int(pos_max_rotation); 
-    rubber_temp_value = rubber_temp_value < 0? pos_max_rotation + rubber_temp_value : rubber_temp_value;
-   
+    //rubber_temp_value = runDetent(0.9, detent_set)%int(pos_max_rotation); 
+    //rubber_temp_value = rubber_temp_value < 0? pos_max_rotation + rubber_temp_value : rubber_temp_value;
+    
     old_button_state = buttonState;
 
       //motor.move(motor.PID_velocity(attract_angle - shaftAngle));
@@ -389,6 +472,8 @@ void motorTaskCode(void *pvParameters) {
 
     struct knobState currentState;
     currentState.rot = rubber_temp_value;
+    currentState.in_menu = in_menu;
+    currentState.current_menu = current_menu;
     //currentState.num_of_detent = number_of_detent;
     //currentState.detent_rad_width = detent;
     //currentState.max_rot = pos_max_rotation;
